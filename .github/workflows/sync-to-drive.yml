@@ -1,0 +1,51 @@
+name: Sync wedding photos to Google Drive
+
+# Runs on a schedule so newly uploaded photos/videos land in the shared
+# Drive folder automatically, without touching the upload app itself.
+#
+# Uses `rclone copy` (not `sync`) deliberately: copy only ever adds or
+# updates files in the destination, it never deletes anything from
+# Drive. That means if the couple reorganizes or deletes files in their
+# Drive folder, this job won't silently undo that on the next run.
+
+on:
+  schedule:
+    # Every 15 minutes. GitHub's cron scheduler is best-effort and can
+    # run a little late, especially on the hour — that's fine here.
+    - cron: "*/15 * * * *"
+  workflow_dispatch: {} # lets you trigger a run manually from the Actions tab
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install rclone
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y rclone
+
+      - name: Copy new files from R2 to Google Drive
+        env:
+          # --- Source: Cloudflare R2 (same credentials as the upload app) ---
+          RCLONE_CONFIG_R2_TYPE: s3
+          RCLONE_CONFIG_R2_PROVIDER: Cloudflare
+          RCLONE_CONFIG_R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          RCLONE_CONFIG_R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          RCLONE_CONFIG_R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+
+          # --- Destination: Google Drive ---
+          RCLONE_CONFIG_GDRIVE_TYPE: drive
+          RCLONE_CONFIG_GDRIVE_CLIENT_ID: ${{ secrets.GDRIVE_CLIENT_ID }}
+          RCLONE_CONFIG_GDRIVE_CLIENT_SECRET: ${{ secrets.GDRIVE_CLIENT_SECRET }}
+          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
+          RCLONE_CONFIG_GDRIVE_SCOPE: drive
+
+          R2_BUCKET_NAME: ${{ secrets.R2_BUCKET_NAME }}
+        run: |
+          rclone copy "r2:${R2_BUCKET_NAME}/wedding" "gdrive:WeddingPhotos" \
+            --progress \
+            --checksum \
+            --transfers 4
+
+      - name: Summary
+        run: echo "Sync complete: $(date -u)"
